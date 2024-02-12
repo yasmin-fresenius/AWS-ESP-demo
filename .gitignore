@@ -49,3 +49,9 @@ config.json
 
 # Ignore virtual environments
 venv/
+
+# Ignore .zip files
+*.zip
+
+# Ignore __pycache__ directories
+__pycache__/

@@ -1,8 +1,11 @@
 import boto3
 import json
 from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
 import hashlib
 import pandas as pd
+import numpy as np
+import datetime
 
 S3_CLIENT = boto3.client('s3')
 
@@ -24,6 +27,13 @@ def secret_key(secret_name=None):
 
     return key
 
+
+def parse_file_name(file):
+    """Get the file name from the object key"""
+    directory, file_with_extension = file.split('/')
+    file_name, extension = file_with_extension.split('.')
+    return directory, file_with_extension, file_name, extension
+
 def process_file(bucket_name:str, object_key:str):
     """Process the file to FPE using config file."""
     try:
@@ -32,9 +42,8 @@ def process_file(bucket_name:str, object_key:str):
         contents = list_of_files.get('Contents')
 
         # Validate the object key if config file or not
-        folder, file = object_key.split('/')
-        file, ext = file.split('.')
-        file = file.split('_')
+        directory, file_with_extension, file_name, extension = parse_file_name(object_key)
+        file = file_name.split('_')
         if 'config' not in file:
             raise ValueError("Uploaded file is not a config file.")
 
@@ -43,6 +52,7 @@ def process_file(bucket_name:str, object_key:str):
         if config_file is None:
             raise ValueError("Not a valid file")
         config_df = pd.read_csv(S3_CLIENT.get_object(Bucket=bucket_name, Key=config_file)['Body'], delimiter=',')
+        print(config_df.head())
 
         # Find the corresponding file based on DatasetName in config file
         file = next((obj['Key'] for obj in contents if obj['Key'] == config_df['Dataset Name'].iloc[0]), None)
@@ -57,9 +67,47 @@ def process_file(bucket_name:str, object_key:str):
         key = secret_key(secret_name=secret_arn)
         cipher = AES.new(key, AES.MODE_ECB)
 
-        # Continue tomorrow
+        # Deidentify type
+        deidentify_type = config_df['Deidentify Method (optional)'].iloc[0]
+        if deidentify_type is np.nan:
+            deidentify_type = 'anonymyzation'
+
+        # get the masking column and type of data as dict
+        data_type = {x['Field']: x['Data Type'] for _, x in config_df.iterrows() if x['Deidentify (y/n)'] == 'y'}
+
+        # FPE
+        if deidentify_type == 'anonymyzation':  # Masking type
+            for col in df.columns:
+                if data_type.get(col) == 'number':
+                    # data type is integer
+                    if df[col].dtype in ['int64', 'int32']:
+                        df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
+                        df[col] = df[col].apply(lambda x: x[:6])
+                        df[col] = df[col].apply(lambda x: int(x, 16))
+                    # data type is float
+                    elif df[col].dtype in ['float64', 'float32']:
+                        df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
+                        df[col] = df[col].apply(lambda x: x[:6])
+                        df[col] = df[col].apply(lambda x: float(int(x, 16)))
+                elif data_type.get(col) == 'text':
+                    df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
+                    df[col] = df[col].apply(lambda x: ''.join(filter(str.isalpha, x)))
+                elif data_type.get(col) == 'date':
+                    df[col] = df[col].apply(lambda x: datetime.datetime.strptime(x, '%d.%m.%Y').date())
+                    df[col] = df[col].apply(lambda x: x + datetime.timedelta(days=8479))
+                else:
+                    df[col] = df[col].apply(lambda x: x)
+
+
+
+        directory, file_with_extension, file_name, extension = parse_file_name(file)
+        print(directory, file_with_extension, file_name, extension)
+        # Save the modified DataFrame to a new CSV file
+        df.to_csv(f"{file_with_extension}", index=False)
+        # Upload the modified CSV file to S3
+        # S3_CLIENT.put_object(Bucket='esp-demo-available-bucket', Key=f'available/{file_with_extension}', Body=open(f'{file_with_extension}', 'rb'))
+        # return df
     except Exception as e:
-        print(e)
+        raise ValueError(str(e))
 
 
-process_file('esp-demo-bucket', 'raw/employee_config.csv')
