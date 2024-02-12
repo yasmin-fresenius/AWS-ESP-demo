@@ -13,6 +13,9 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v2
 
+    - name: Install zip
+      run: sudo apt-get install zip -y
+
     - name: Zip files
       run: |
         # Go to the directory containing the files
@@ -20,4 +23,11 @@ jobs:
       
         # Zip the files
         zip -r ESP-demo.zip service_files lambda_function.py
+        
+
+#    - name: Upload zip file
+#      uses: actions/upload-artifact@v2
+#      with:
+#        name: zipped-files
+#        path: ESP-demo.zip
 
