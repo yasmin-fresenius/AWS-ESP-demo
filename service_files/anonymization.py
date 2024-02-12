@@ -35,6 +35,40 @@ def parse_file_name(file):
     file_name, extension = file_with_extension.split('.')
     return directory, file_with_extension, file_name, extension
 
+def format_preserving_encryption(df, config_df, cipher):
+    # Deidentify type
+    deidentify_type = config_df['Deidentify Method (optional)'].iloc[0]
+    if deidentify_type is np.nan:
+        deidentify_type = 'anonymyzation'
+
+    # get the masking column and type of data as dict
+    data_type = {x['Field']: x['Data Type'] for _, x in config_df.iterrows() if x['Deidentify (y/n)'] == 'y'}
+
+    # FPE
+    if deidentify_type == 'anonymyzation':  # Masking type
+        for col in df.columns:
+            if data_type.get(col) == 'number':
+                # data type is integer
+                if df[col].dtype in ['int64', 'int32']:
+                    df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
+                    df[col] = df[col].apply(lambda x: x[:6])
+                    df[col] = df[col].apply(lambda x: int(x, 16))
+                # data type is float
+                elif df[col].dtype in ['float64', 'float32']:
+                    df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
+                    df[col] = df[col].apply(lambda x: x[:6])
+                    df[col] = df[col].apply(lambda x: float(int(x, 16)))
+            elif data_type.get(col) == 'text':
+                df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
+                df[col] = df[col].apply(lambda x: ''.join(filter(str.isalpha, x)))
+            elif data_type.get(col) == 'date':
+                df[col] = df[col].apply(lambda x: datetime.datetime.strptime(x, '%d.%m.%Y').date())
+                df[col] = df[col].apply(lambda x: x + datetime.timedelta(days=8479))
+            else:
+                df[col] = df[col].apply(lambda x: x)
+
+    return df
+
 def process_file(bucket_name:str, object_key:str):
     """Process the file to FPE using config file."""
     try:
@@ -67,44 +101,14 @@ def process_file(bucket_name:str, object_key:str):
         key = secret_key(secret_name=secret_arn)
         cipher = AES.new(key, AES.MODE_ECB)
 
-        # Deidentify type
-        deidentify_type = config_df['Deidentify Method (optional)'].iloc[0]
-        if deidentify_type is np.nan:
-            deidentify_type = 'anonymyzation'
+        encrypted_df = format_preserving_encryption(df, config_df, cipher)
 
-        # get the masking column and type of data as dict
-        data_type = {x['Field']: x['Data Type'] for _, x in config_df.iterrows() if x['Deidentify (y/n)'] == 'y'}
-
-        # FPE
-        if deidentify_type == 'anonymyzation':  # Masking type
-            for col in df.columns:
-                if data_type.get(col) == 'number':
-                    # data type is integer
-                    if df[col].dtype in ['int64', 'int32']:
-                        df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
-                        df[col] = df[col].apply(lambda x: int(x, 16))
-                        df[col] = df[col].apply(lambda x: x[:6])
-                    # data type is float
-                    elif df[col].dtype in ['float64', 'float32']:
-                        df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
-                        df[col] = df[col].apply(lambda x: float(int(x, 16)))
-                        df[col] = df[col].apply(lambda x: x[:6])
-                elif data_type.get(col) == 'text':
-                    df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
-                    df[col] = df[col].apply(lambda x: ''.join(filter(str.isalpha, x)))
-                elif data_type.get(col) == 'date':
-                    df[col] = df[col].apply(lambda x: datetime.datetime.strptime(x, '%d.%m.%Y').date())
-                    df[col] = df[col].apply(lambda x: x + datetime.timedelta(days=8479))
-                else:
-                    df[col] = df[col].apply(lambda x: x)
-
-
+        print(encrypted_df.head())
         directory, file_with_extension, file_name, extension = parse_file_name(file)
-
 
         # Save the modified DataFrame to a new CSV file and upload it to S3
         csv_buffer = io.StringIO()
-        df.to_csv(csv_buffer, index=False)
+        encrypted_df.to_csv(csv_buffer, index=False)
         csv_buffer.seek(0)
 
         # Upload the modified CSV file to S3
@@ -112,4 +116,3 @@ def process_file(bucket_name:str, object_key:str):
         # return df
     except Exception as e:
         raise ValueError(str(e))
-
