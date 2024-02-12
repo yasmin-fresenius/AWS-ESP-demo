@@ -1,37 +1,37 @@
-name: Zip Files
-
-on:
-  push:
-    branches:
-      - dev-yasmin
-
-jobs:
-  zip:
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.10'
-
-    - name: Install zip
-      run: sudo apt-get install zip -y
-
-    - name: Zip files
-      run: |
-        # Go to the directory containing the files
-        cd AWS-ESP-demo
-      
-        # Zip the files
-        zip -r ESP-demo.zip service_files lambda_function.py
-
-    - name: Upload zip file
-      uses: actions/upload-artifact@v2
-      with:
-        name: zipped-files
-        path: ESP-demo.zip
-
+#name: Zip Files
+#
+#on:
+#  push:
+#    branches:
+#      - dev-yasmin
+#
+#jobs:
+#  zip:
+#    runs-on: ubuntu-latest
+#
+#    steps:
+#    - name: Checkout code
+#      uses: actions/checkout@v2
+#
+#    - name: Set up Python
+#      uses: actions/setup-python@v2
+#      with:
+#        python-version: '3.10'
+#
+#    - name: Install zip
+#      run: sudo apt-get install zip -y
+#
+#    - name: Zip files
+#      run: |
+#        # Go to the directory containing the files
+#        cd AWS-ESP-demo
+#
+#        # Zip the files
+#        zip -r ESP-demo.zip service_files lambda_function.py
+#
+#    - name: Upload zip file
+#      uses: actions/upload-artifact@v2
+#      with:
+#        name: zipped-files
+#        path: ESP-demo.zip
+#
