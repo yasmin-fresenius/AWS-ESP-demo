@@ -6,6 +6,7 @@ import hashlib
 import pandas as pd
 import numpy as np
 import datetime
+import io
 
 S3_CLIENT = boto3.client('s3')
 
@@ -52,7 +53,6 @@ def process_file(bucket_name:str, object_key:str):
         if config_file is None:
             raise ValueError("Not a valid file")
         config_df = pd.read_csv(S3_CLIENT.get_object(Bucket=bucket_name, Key=config_file)['Body'], delimiter=',')
-        print(config_df.head())
 
         # Find the corresponding file based on DatasetName in config file
         file = next((obj['Key'] for obj in contents if obj['Key'] == config_df['Dataset Name'].iloc[0]), None)
@@ -82,13 +82,13 @@ def process_file(bucket_name:str, object_key:str):
                     # data type is integer
                     if df[col].dtype in ['int64', 'int32']:
                         df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
-                        df[col] = df[col].apply(lambda x: x[:6])
                         df[col] = df[col].apply(lambda x: int(x, 16))
+                        df[col] = df[col].apply(lambda x: x[:6])
                     # data type is float
                     elif df[col].dtype in ['float64', 'float32']:
                         df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
-                        df[col] = df[col].apply(lambda x: x[:6])
                         df[col] = df[col].apply(lambda x: float(int(x, 16)))
+                        df[col] = df[col].apply(lambda x: x[:6])
                 elif data_type.get(col) == 'text':
                     df[col] = df[col].apply(lambda x: cipher.encrypt(pad(str(x).encode(), AES.block_size)).hex())
                     df[col] = df[col].apply(lambda x: ''.join(filter(str.isalpha, x)))
@@ -99,15 +99,17 @@ def process_file(bucket_name:str, object_key:str):
                     df[col] = df[col].apply(lambda x: x)
 
 
-
         directory, file_with_extension, file_name, extension = parse_file_name(file)
-        print(directory, file_with_extension, file_name, extension)
-        # Save the modified DataFrame to a new CSV file
-        df.to_csv(f"{file_with_extension}", index=False)
+
+
+        # Save the modified DataFrame to a new CSV file and upload it to S3
+        csv_buffer = io.StringIO()
+        df.to_csv(csv_buffer, index=False)
+        csv_buffer.seek(0)
+
         # Upload the modified CSV file to S3
-        # S3_CLIENT.put_object(Bucket='esp-demo-available-bucket', Key=f'available/{file_with_extension}', Body=open(f'{file_with_extension}', 'rb'))
+        S3_CLIENT.put_object(Bucket='esp-demo-available-bucket', Key=f'available/{file_name}_encrypted.csv', Body=csv_buffer.getvalue())
         # return df
     except Exception as e:
         raise ValueError(str(e))
-
 
